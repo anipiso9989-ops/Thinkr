@@ -19,4 +19,4 @@ A fast, keyboard-first note-taking app with an infinite canvas. Everything runs 
 
 Your work is saved in this browser using IndexedDB. Export `.thinkr` backups to keep a portable copy or move between devices. There is no automatic cloud sync. KaTeX loads from a CDN and needs internet access to load.
 
-See [guide.md](guide.md) for controls and usage.
+See [guide.md](guide.md) for up-to-date controls and usage.
