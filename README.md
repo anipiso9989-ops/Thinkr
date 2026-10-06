@@ -1,10 +1,10 @@
 # Thinkr
 
-A fast, keyboard-first note-taking app with an infinite canvas. Everything runs in one `index.html` file—no installation, account, backend, or build step.
+A fast, keyboard-first note-taking app with an infinite canvas. Everything runs in one `thinkr.html` file—no installation, account, backend, or build step.
 
 ## Start
 
-1. Download `index.html`.
+1. Download `thinkr.html`.
 2. Open it in your browser.
 3. Press **N** or double-click empty space to write a note.
 
