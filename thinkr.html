@@ -776,7 +776,7 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
         /* Do not cache this world as a compositor layer: text must be
            rasterized again at the current scale when the canvas zooms. */
       }
-      #edges {
+      #edges, #edge-handles {
         position: absolute;
         left: 0;
         top: 0;
@@ -786,6 +786,10 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
         pointer-events: none;
         fill: none;
       }
+      #edge-handles { z-index: 3; }
+      .edge-endpoint-hit { pointer-events: all; fill: transparent; cursor: grab; touch-action: none; }
+      .edge-endpoint-dot { fill: var(--card); stroke: var(--text); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+      #edge-handles.dragging .edge-endpoint-hit { cursor: grabbing; }
       #edges path {
         fill: none;
         stroke-linecap: butt;
@@ -1187,6 +1191,27 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
         background: var(--bg);
         color: var(--text);
       }
+      .heading-control { position: relative; }
+      #editor-bar #heading-toggle { border-left: 1px solid var(--line); }
+      #heading-menu {
+        position: fixed;
+        min-width: 160px;
+        max-height: min(280px, calc(100vh - 16px));
+        overflow-y: auto;
+        padding: 4px;
+        border: 1px solid var(--active);
+        background: var(--panel);
+        z-index: 26;
+      }
+      #editor-bar #heading-menu button {
+        display: block;
+        width: 100%;
+        height: 32px;
+        border: 0;
+        text-align: left;
+      }
+      #heading-menu button[aria-checked="true"] { background: var(--accent-soft); }
+      #heading-menu button:focus-visible { outline: 1px solid var(--active); outline-offset: -1px; }
       #slash-menu,
       #context-menu {
         position: fixed;
@@ -1431,6 +1456,14 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
       .note-body > .editor-block.md-blank {
         margin: 0;
       }
+      .note-body > .editor-block.md-list { margin: 0; }
+      .note-body > .editor-block.md-list-end { margin-bottom: 12px; }
+      .md-list-heading { font-weight: 400; line-height: 1.3; letter-spacing: -0.02em; }
+      .md-list-heading[data-depth="1"] { font-size: 24px; }
+      .md-list-heading[data-depth="2"] { font-size: 21px; }
+      .md-list-heading[data-depth="3"] { font-size: 18px; }
+      .md-list-heading[data-depth="5"] { font-size: 0.83em; }
+      .md-list-heading[data-depth="6"] { font-size: 0.67em; }
       .editor-block .md-marker {
         display: none;
         color: var(--muted);
@@ -1807,6 +1840,7 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
               <g id="edge-paths"></g>
             </svg>
             <div id="notes"></div>
+            <svg id="edge-handles" aria-label="Connection endpoints"></svg>
           </div>
           <div id="marquee" class="hidden"></div>
         </div>
@@ -1892,8 +1926,17 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
           <button data-format="bold" title="Bold · Ctrl/⌘ B"><b>B</b></button
           ><button data-format="italic" title="Italic · Ctrl/⌘ I">
             <i>I</i></button
-          ><button data-format="h2" title="Heading">H</button
-          ><button data-format="list" title="List">≡</button
+          ><div class="heading-control">
+            <button id="heading-toggle" title="Choose heading level" aria-label="Choose heading level" aria-haspopup="menu" aria-expanded="false" aria-controls="heading-menu">H ▾</button>
+            <div id="heading-menu" class="hidden" role="menu" aria-label="Heading level">
+              <button role="menuitemradio" aria-checked="false" data-format="h1">H1 · Heading 1</button>
+              <button role="menuitemradio" aria-checked="false" data-format="h2">H2 · Heading 2</button>
+              <button role="menuitemradio" aria-checked="false" data-format="h3">H3 · Heading 3</button>
+              <button role="menuitemradio" aria-checked="false" data-format="h4">H4 · Heading 4</button>
+              <button role="menuitemradio" aria-checked="false" data-format="h5">H5 · Heading 5</button>
+              <button role="menuitemradio" aria-checked="false" data-format="h6">H6 · Heading 6</button>
+            </div>
+          </div><button data-format="list" title="List">≡</button
           ><button data-format="checklist" title="Checklist">☑</button
           ><button data-format="link" title="Link">↗</button
           ><button data-format="math" title="Math">∑</button
@@ -3766,7 +3809,56 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
         $("#empty-message").classList.toggle("hidden", canvas().notes.length > 0);
         renderEdges();
       }
-      function connectionPath(a, b) {
+      // A side plus a proportional offset keeps endpoints attached through resizing.
+      function connectionAnchors(a, b, edge = {}) {
+        const dx = b.x + b.w / 2 - a.x - a.w / 2,
+          dy = b.y + displayHeight(b) / 2 - a.y - displayHeight(a) / 2,
+          horizontal = Math.abs(dx) >= Math.abs(dy);
+        return {
+          from: edge.fromAnchor || { side: horizontal ? (dx >= 0 ? "right" : "left") : (dy >= 0 ? "bottom" : "top"), t: 0.5 },
+          to: edge.toAnchor || { side: horizontal ? (dx >= 0 ? "left" : "right") : (dy >= 0 ? "top" : "bottom"), t: 0.5 },
+        };
+      }
+      function anchorPoint(n, anchor) {
+        const { side, t } = anchor, h = displayHeight(n);
+        return { x: n.x + (side === "left" ? 0 : side === "right" ? n.w : n.w * t),
+          y: n.y + (side === "top" ? 0 : side === "bottom" ? h : h * t) };
+      }
+      function nearestAnchor(n, p, previous) {
+        const x = Math.max(0, Math.min(n.w, p.x - n.x)),
+          y = Math.max(0, Math.min(displayHeight(n), p.y - n.y));
+        const candidates = [
+          { side: "top", t: x / n.w }, { side: "right", t: y / displayHeight(n) },
+          { side: "bottom", t: x / n.w }, { side: "left", t: y / displayHeight(n) },
+        ];
+        // Preserve the current side at a corner, where two projections tie.
+        candidates.sort((a, b) => Number(b.side === previous?.side) - Number(a.side === previous?.side));
+        return candidates.reduce((best, a) => {
+          const q = anchorPoint(n, a), d = Math.hypot(q.x - p.x, q.y - p.y);
+          return !best || d < best.d - 0.001 ? { a, d } : best;
+        }, null).a;
+      }
+      function anchoredConnectionPath(a, b, edge) {
+        const anchors = connectionAnchors(a, b, edge), p = anchorPoint(a, anchors.from), q = anchorPoint(b, anchors.to), gap = 24;
+        const normal = { top: [0, -1], right: [1, 0], bottom: [0, 1], left: [-1, 0] };
+        const stub = (p, anchor) => ({ x: p.x + normal[anchor.side][0] * gap, y: p.y + normal[anchor.side][1] * gap });
+        const s = stub(p, anchors.from), t = stub(q, anchors.to), routes = [
+          [s, { x: t.x, y: s.y }, t], [s, { x: s.x, y: t.y }, t],
+        ];
+        for (const x of [(s.x + t.x) / 2, Math.min(a.x, b.x) - gap, Math.max(a.x + a.w, b.x + b.w) + gap])
+          routes.push([s, { x, y: s.y }, { x, y: t.y }, t]);
+        for (const y of [(s.y + t.y) / 2, Math.min(a.y, b.y) - gap, Math.max(a.y + displayHeight(a), b.y + displayHeight(b)) + gap])
+          routes.push([s, { x: s.x, y }, { x: t.x, y }, t]);
+        const crosses = (u, v, n) => u.x === v.x
+          ? u.x > n.x && u.x < n.x + n.w && Math.max(u.y, v.y) > n.y && Math.min(u.y, v.y) < n.y + displayHeight(n)
+          : u.y > n.y && u.y < n.y + displayHeight(n) && Math.max(u.x, v.x) > n.x && Math.min(u.x, v.x) < n.x + n.w;
+        const score = (route) => route.slice(1).reduce((sum, v, i) => sum + Math.abs(v.x - route[i].x) + Math.abs(v.y - route[i].y) + ([a, b].some(n => crosses(route[i], v, n)) ? 1000000 : 0), 0);
+        routes.sort((r, s) => score(r) - score(s));
+        const points = [p, ...routes[0], q];
+        return points.map((v, i) => `${i ? "L" : "M"}${v.x},${v.y}`).join(" ");
+      }
+      function connectionPath(a, b, edge = {}) {
+        if (edge.fromAnchor || edge.toAnchor) return anchoredConnectionPath(a, b, edge);
         a = { ...a, h: displayHeight(a) };
         b = { ...b, h: displayHeight(b) };
         const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
@@ -3787,6 +3879,9 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
       function renderEdges() {
         const g = $("#edge-paths");
         g.replaceChildren();
+        const handles = $("#edge-handles");
+        handles.replaceChildren();
+        handles.classList.toggle("dragging", gesture?.type === "edge-endpoint");
         const notesById = new Map(canvas().notes.map((n) => [n.id, n])), bounds = visibleBounds();
         for (const edge of canvas().edges) {
           const a = notesById.get(edge.from),
@@ -3794,7 +3889,7 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
           if (!a || !b) continue;
           if (Math.max(a.x + a.w, b.x + b.w) < bounds.x || Math.min(a.x, b.x) > bounds.right ||
               Math.max(a.y + displayHeight(a), b.y + displayHeight(b)) < bounds.y || Math.min(a.y, b.y) > bounds.bottom) continue;
-          const d = connectionPath(a, b);
+          const d = connectionPath(a, b, edge);
           for (const hit of [false, true]) {
             const path = document.createElementNS(
               "http://www.w3.org/2000/svg",
@@ -3813,6 +3908,27 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
             );
             if (hit) path.dataset.edge = edge.id;
             g.append(path);
+          }
+          if (selectedEdge === edge.id) {
+            const anchors = connectionAnchors(a, b, edge);
+            for (const end of ["from", "to"]) {
+              const p = anchorPoint(end === "from" ? a : b, anchors[end]),
+                handle = document.createElementNS("http://www.w3.org/2000/svg", "g");
+              handle.dataset.edge = edge.id;
+              handle.dataset.endpoint = end;
+              handle.setAttribute("aria-label", `Drag ${end === "from" ? "start" : "end"} along element perimeter`);
+              const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+              title.textContent = "Drag around the edge of this element";
+              handle.append(title);
+              for (const hit of [true, false]) {
+                const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                circle.setAttribute("cx", p.x); circle.setAttribute("cy", p.y);
+                circle.setAttribute("r", (hit ? 12 : 5) / view().z);
+                circle.setAttribute("class", hit ? "edge-endpoint-hit" : "edge-endpoint-dot");
+                handle.append(circle);
+              }
+              handles.append(handle);
+            }
           }
         }
         if (gesture?.type === "connect") {
@@ -4044,7 +4160,7 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
               if (n[key]) n[key] = Object.fromEntries(Object.entries(n[key]).map(([ref, value]) => [remapRef(ref), value]));
           }
           c.notes.push(...imported.notes);
-          c.edges.push(...imported.edges.map((e) => ({ id: uid(), from: ids.get(e.from), to: ids.get(e.to) })));
+          c.edges.push(...imported.edges.map((e) => ({ ...e, id: uid(), from: ids.get(e.from), to: ids.get(e.to) })));
           selected = new Set(imported.notes.map((n) => n.id));
           selectedEdge = null;
         });
@@ -4267,6 +4383,20 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
             appendWhitespace(raw, start);
             return;
           }
+          if (token.type === "list") {
+            // Give every physical list line its own caret container. A caret
+            // after a standalone newline between inline spans has no painted
+            // position in Chromium, even though source-offset editing works.
+            const lines = raw.split("\n");
+            let offset = start;
+            lines.forEach((line, i) => {
+              const newline = i < lines.length - 1;
+              if (!line && !newline) return;
+              blocks.push({ start: offset, source: line, after: newline ? "\n" : "", token });
+              offset += line.length + (newline ? 1 : 0);
+            });
+            return;
+          }
           const fence =
             token.type === "code" &&
             raw.match(/^ {0,3}(`{3,}|~{3,})[^\n]*(?:\n|$)/);
@@ -4396,6 +4526,11 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
                   (m[5].toLowerCase() === "x" ? "checked" : "") +
                   ">"
                 : "";
+              let content = line.slice(m[0].length);
+              const heading = content.match(/^(#{1,6})(?:[ \t]+|$)/);
+              content = heading
+                ? marker(heading[0]) + '<span class="md-list-heading" data-depth="' + heading[1].length + '">' + inlineSource(content.slice(heading[0].length)) + '</span>'
+                : inlineSource(content);
               return (
                 '<span class="md-inline md-list-line' +
                 (task ? " md-task-line" : "") +
@@ -4406,7 +4541,7 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
                 '">' +
                 marker(m[0]) +
                 task +
-                inlineSource(line.slice(m[0].length)) +
+                content +
                 "</span>"
               );
             })
@@ -4546,17 +4681,22 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
           b = editorBlocks[i],
           el = bodyEl(editing).children[i];
         let left = Math.max(0, Math.min(pos - b.start, b.source.length)),
-          point = null;
+          point = null, boundary = null;
         function walk(n) {
           if (point || (n.nodeType === 1 && n.hasAttribute("data-md-preview")))
             return;
           if (n.nodeType === 3) {
-            if (left <= n.length) point = { node: n, offset: left };
-            else left -= n.length;
+            if (left < n.length) point = { node: n, offset: left };
+            else {
+              // At a shared boundary prefer the following text node, rather
+              // than the end of a hidden marker or a newline-only text node.
+              if (left === n.length) boundary = { node: n, offset: left };
+              left -= n.length;
+            }
           } else [...n.childNodes].forEach(walk);
         }
         walk(el);
-        return point || { node: el, offset: 0 };
+        return point || boundary || { node: el, offset: 0 };
       }
       function activateEditorBlocks(cursor) {
         const first = editorBlockAt(cursor.from),
@@ -4609,6 +4749,7 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
               tag +
               ' class="editor-block md-' +
               b.token.type +
+              (b.token.type === "list" && editorBlocks[i + 1]?.token.type !== "list" ? " md-list-end" : "") +
               (!b.source.trim() ? " md-blank" : "") +
               '" data-md-block="' +
               i +
@@ -4742,6 +4883,7 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
         editBefore = null;
         savedRange = null;
         hideSlash();
+        closeHeadingMenu();
         $("#editor-bar").classList.add("hidden");
         const el = document.getElementById("note-" + id);
         if (el) {
@@ -4779,6 +4921,56 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
               viewport.offsetTop + v.y + n.y * v.z - 36,
             ),
           ) + "px";
+        positionHeadingMenu();
+      }
+      function closeHeadingMenu() {
+        $("#heading-menu").classList.add("hidden");
+        $("#heading-toggle").setAttribute("aria-expanded", "false");
+      }
+      function positionHeadingMenu() {
+        const menu = $("#heading-menu");
+        if (menu.classList.contains("hidden")) return;
+        const r = $("#heading-toggle").getBoundingClientRect(), h = menu.offsetHeight;
+        menu.style.left = Math.max(8, Math.min(innerWidth - menu.offsetWidth - 8, r.left)) + "px";
+        menu.style.top = Math.max(8, Math.min(innerHeight - h - 8, r.bottom + h + 4 <= innerHeight ? r.bottom + 4 : r.top - h - 4)) + "px";
+      }
+      function openHeadingMenu(focus = false) {
+        if (!editing) return;
+        rememberRange(); hideSlash();
+        const start = editorCursor.to === 0 ? 0 : editorSource.lastIndexOf("\n", editorCursor.to - 1) + 1,
+          line = editorSource.slice(start).split("\n")[0],
+          current = line.match(/^(?:[ \t]*(?:[-+*]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)? {0,3}(#{1,6})(?:[ \t]+|$)/)?.[1].length;
+        for (const b of $$("#heading-menu button")) b.setAttribute("aria-checked", String(b.dataset.format === "h" + current));
+        $("#heading-menu").classList.remove("hidden");
+        $("#heading-toggle").setAttribute("aria-expanded", "true");
+        positionHeadingMenu();
+        if (focus) ($("#heading-menu [aria-checked=true]") || $("#heading-menu button")).focus({ preventScroll: true });
+      }
+      function applyHeading(level, sel) {
+        const start = sel.from === 0 ? 0 : editorSource.lastIndexOf("\n", sel.from - 1) + 1,
+          last = sel.to > sel.from && editorSource[sel.to - 1] === "\n" ? sel.to - 1 : sel.to,
+          end = editorSource.indexOf("\n", last), stop = end < 0 ? editorSource.length : end,
+          edits = [];
+        let offset = start;
+        const replacement = editorSource.slice(start, stop).split("\n").map(line => {
+          // Headings inside list items must retain their bullet and indentation.
+          const container = line.match(/^[ \t]*(?:[-+*]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/)?.[0] || line.match(/^ {0,3}/)[0],
+            oldHeading = line.slice(container.length).match(/^#{1,6}(?:[ \t]+|$)/)?.[0] || "",
+            before = container + oldHeading, after = container + "#".repeat(level) + " ";
+          edits.push({ start: offset, before: before.length, after: after.length, container: container.length });
+          offset += line.length + 1;
+          return after + line.slice(before.length);
+        }).join("\n");
+        const remap = pos => {
+          let delta = 0;
+          for (const e of edits) {
+            if (pos < e.start) break;
+            if (pos <= e.start + e.before) return e.start + delta + (pos < e.start + e.container ? pos - e.start : e.after);
+            delta += e.after - e.before;
+          }
+          return pos + delta;
+        };
+        applyEditorSource(editorSource.slice(0, start) + replacement + editorSource.slice(stop), { from: remap(sel.from), to: remap(sel.to) });
       }
       function insertHTML(html) {
         const root = document.createElement("div");
@@ -4793,6 +4985,7 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
       }
       function format(type) {
         if (!editing) return;
+        closeHeadingMenu();
         if (type === "done") {
           finishEdit();
           viewport.focus();
@@ -4808,16 +5001,12 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
             from: sel.from + d.length,
             to: sel.from + d.length + text.length,
           });
-        } else if (
-          /^h[1-6]$/.test(type) ||
-          ["list", "quote", "checklist"].includes(type)
-        ) {
+        } else if (/^h[1-6]$/.test(type)) applyHeading(+type[1], sel);
+        else if (["list", "quote", "checklist"].includes(type)) {
           const start = editorSource.lastIndexOf("\n", sel.from - 1) + 1,
             end = editorSource.indexOf("\n", sel.to),
             stop = end < 0 ? editorSource.length : end,
-            prefix = /^h/.test(type)
-              ? "#".repeat(+type[1]) + " "
-              : type === "list"
+            prefix = type === "list"
                 ? "- "
                 : type === "quote"
                   ? "> "
@@ -5952,7 +6141,7 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
           if (!a || !b) continue;
           ctx.strokeStyle = css.getPropertyValue("--muted");
           ctx.lineWidth = 1;
-          ctx.stroke(new Path2D(connectionPath(a, b)));
+          ctx.stroke(new Path2D(connectionPath(a, b, edge)));
         }
         for (const n of ns) {
           const copy = createNoteElement(n, c);
@@ -6187,7 +6376,15 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
             const id =
               typeof e.id === "string" && !edgeIds.has(e.id) ? e.id : uid();
             edgeIds.add(id);
-            return { id, from: e.from, to: e.to };
+            const out = { id, from: e.from, to: e.to };
+            for (const key of ["fromAnchor", "toAnchor"]) {
+              if (e[key] === undefined) continue;
+              const anchor = e[key];
+              if (!anchor || !["top", "right", "bottom", "left"].includes(anchor.side) || !Number.isFinite(anchor.t) || anchor.t < 0 || anchor.t > 1)
+                throw Error("Invalid connection endpoint");
+              out[key] = { side: anchor.side, t: anchor.t };
+            }
+            return out;
           });
         const v =
           raw.view &&
@@ -6258,6 +6455,17 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
           };
           viewport.style.cursor = "grabbing";
           viewport.setPointerCapture(e.pointerId);
+          return;
+        }
+        const endpoint = e.target.closest("[data-endpoint]");
+        if (endpoint) {
+          e.preventDefault();
+          finishEdit(); closeSelectionPopovers();
+          gesture = { type: "edge-endpoint", edgeId: endpoint.dataset.edge, end: endpoint.dataset.endpoint,
+            screenX: e.clientX, screenY: e.clientY, before: snapshot() };
+          viewport.setPointerCapture(e.pointerId);
+          viewport.style.cursor = "grabbing";
+          viewport.focus();
           return;
         }
         if (beginGroupGesture(e, p)) return;
@@ -6369,6 +6577,14 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
           view().x = g.vx + e.clientX - g.x;
           view().y = g.vy + e.clientY - g.y;
           applyView();
+        } else if (g.type === "edge-endpoint") {
+          if (!g.moved && Math.hypot(e.clientX - g.screenX, e.clientY - g.screenY) < 2) return;
+          g.moved = true;
+          const edge = canvas().edges.find(e => e.id === g.edgeId), n = edge && note(edge[g.end]);
+          if (!n) return;
+          const key = g.end + "Anchor";
+          edge[key] = nearestAnchor(n, p, edge[key]);
+          renderEdges();
         } else if (g.type === "move") {
           if (g.expandOnClick) g.moved = Math.hypot(e.clientX - g.screenX, e.clientY - g.screenY) > 5 || g.moved;
           if (g.expandOnClick && !g.moved) return;
@@ -6465,6 +6681,7 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
         } else if (g.expandOnClick && !g.moved) setCollapsed([g.expandOnClick], false);
         else if (g.before) record(g.before);
         else if (g.type === "pan") scheduleSave();
+        if (g.type === "edge-endpoint") renderEdges();
         if (viewport.hasPointerCapture(e.pointerId))
           viewport.releasePointerCapture(e.pointerId);
         scheduleVirtualRender();
@@ -6888,8 +7105,30 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
         rememberRange();
       });
       $("#editor-bar").addEventListener("click", (e) => {
+        if (e.target.closest("#heading-toggle")) {
+          if ($("#heading-menu").classList.contains("hidden")) openHeadingMenu();
+          else closeHeadingMenu();
+          return;
+        }
         const b = e.target.closest("[data-format]");
         if (b) format(b.dataset.format);
+      });
+      document.addEventListener("pointerdown", e => {
+        if (!e.target.closest(".heading-control")) closeHeadingMenu();
+      });
+      $("#editor-bar").addEventListener("keydown", e => {
+        if (!e.ctrlKey && !e.metaKey && e.target.closest(".heading-control") && ["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+          e.preventDefault(); e.stopPropagation();
+          if ($("#heading-menu").classList.contains("hidden")) { openHeadingMenu(true); return; }
+          const buttons = $$("#heading-menu button"), index = buttons.indexOf(document.activeElement),
+            next = e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : (index + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+          buttons[next].focus({ preventScroll: true });
+        } else if (e.key === "Escape" && !$("#heading-menu").classList.contains("hidden")) {
+          e.preventDefault(); e.stopPropagation(); closeHeadingMenu(); restoreRange();
+        } else if (["Enter", " ", "Tab"].includes(e.key)) {
+          if (e.key === "Tab") closeHeadingMenu();
+          e.stopPropagation();
+        }
       });
       $("#slash-menu").addEventListener("pointerdown", (e) =>
         e.preventDefault(),
@@ -6913,6 +7152,9 @@ function a(e,t){return n(e)||r(e,t)||o(e,t)||i()}function o(e,n){if(e){if(typeof
             e.target.isContentEditable;
         if (e.key === "Escape") {
           e.preventDefault();
+          if (!$("#heading-menu").classList.contains("hidden")) {
+            closeHeadingMenu(); restoreRange(); return;
+          }
           if (gesture) {
             const g = gesture;
             viewport.dispatchEvent(new PointerEvent("pointercancel", { pointerId: activePointerId || 1 }));
